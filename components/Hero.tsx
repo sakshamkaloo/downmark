@@ -1,4 +1,3 @@
-
 export default function Hero() {
   return (
     <section
@@ -26,8 +25,8 @@ export default function Hero() {
         </p>
 
         <h1
+          className="hero-title"
           style={{
-            fontSize: "64px",
             lineHeight: 1.1,
             fontWeight: 800,
             color: "#111827",
@@ -46,7 +45,8 @@ export default function Hero() {
             margin: "0 auto 32px",
           }}
         >
-          Paste markdown, preview rendered content instantly, and export it directly into Google Docs with perfect formatting.
+          Paste markdown, preview rendered content instantly, and export it
+          directly into Google Docs with perfect formatting.
         </p>
 
         <div
@@ -57,22 +57,26 @@ export default function Hero() {
             flexWrap: "wrap",
           }}
         >
-          <button
+          <a
+            href="#converter"
             style={{
               background: "#5E6BFF",
               color: "#fff",
-              border: "none",
               padding: "14px 24px",
               borderRadius: "12px",
               fontSize: "16px",
               fontWeight: 600,
-              cursor: "pointer",
+              textDecoration: "none",
+              display: "inline-block",
             }}
           >
             Start Converting
-          </button>
+          </a>
 
-          <button
+          <a
+            href="https://docs.google.com"
+            target="_blank"
+            rel="noopener noreferrer"
             style={{
               background: "#fff",
               color: "#111827",
@@ -81,13 +85,14 @@ export default function Hero() {
               borderRadius: "12px",
               fontSize: "16px",
               fontWeight: 600,
-              cursor: "pointer",
+              textDecoration: "none",
+              display: "inline-block",
             }}
           >
-            Live Demo
-          </button>
+            Google Docs
+          </a>
         </div>
       </div>
-    </section>
+        </section>
   );
 }
