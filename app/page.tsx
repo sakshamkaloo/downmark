@@ -7,70 +7,191 @@ import PreviewPanel from "@/components/PreviewPanel";
 import { generateDocx } from "@/lib/generateDocx";
 import CreateGoogleDocButton from "@/components/CreateGoogleDocButton";
 
-const SAMPLE_MARKDOWN = `# Welcome to Markdown → Google Docs
+const SAMPLE_MARKDOWN = `
+# Hostel Management Software Systems For All Types Of Schools and Colleges
 
-## What this tool does
+## Meta Description
 
-Paste **any Markdown** on the left and see a live preview on the right. When you're happy, click **Create Google Doc** to export it instantly.
+*Learn how hostel management systems have become an essential part for all types of schools and colleges in managing campus hostels and how they solve the traditional challenges in hostel operations with ease.*
 
----
+## Short Summary
 
-## Supported Formatting
+This article dives into why a **hostel management system** is essential for modern education.
 
-### Text Styles
+## Introduction
 
-Here's some **bold text**, some *italic text*, and even ~~strikethrough~~.
+Hostel life is said to be a key rewarding phase of a student's academic career, offering a special fusion of independent living, community development, and academic focus.
 
-You can also write \`inline code\` inside a sentence.
+### Video Reference
 
-### Blockquote
-
-> "The best way to predict the future is to invent it."
-> — Alan Kay
-
-### Code Block
-
-\`\`\`javascript
-function greet(name) {
-  return \`Hello, \${name}!\`;
-}
-console.log(greet("World"));
-\`\`\`
+https://www.youtube.com/watch?v=gT-qWa9JJsg&list=RDgT-qWa9JJsg&start_radio=1
 
 ---
 
-## Feature Table
+## Old Challenges, Modern Demands: The Transformation of Hostel Management
 
-| Feature        | Markdown | Google Doc | DOCX |
-| -------------- | :------: | :--------: | :--: |
-| Headings (H1–H4) | ✅     | ✅         | ✅   |
-| Bold & Italic  | ✅       | ✅         | ✅   |
-| Tables         | ✅       | ✅         | ✅   |
-| Bullet Lists   | ✅       | ✅         | ✅   |
-| Ordered Lists  | ✅       | ✅         | ✅   |
-| Code Blocks    | ✅       | ✅         | ✅   |
-| Blockquotes    | ✅       | ✅         | ✅   |
+For students, a hostel is more than just a place to sleep; it's a home, a community, and a big part of their campus experience.
 
----
+### Traditional Challenges vs Modern Digital Solutions
 
-## Getting Started
-
-* Paste your Markdown into the editor on the left
-* See the formatted preview update in real time
-* Click **Create Google Doc** to export to Google Drive
-* Or click **Download .docx** for a local Word file
-
-### Ordered Steps
-
-1. Write or paste Markdown
-2. Review the live preview
-3. Export with one click
+| Traditional Challenges | Modern Demands & Digital Solutions |
+|------------------------|------------------------------------|
+| Manual, error-prone process | Centralised real-time data |
+| Inefficient communication | Instant notifications and apps |
+| Slow complaint handling | Transparent issue tracking |
+| Manual visitor logs | Smart access control |
+| Manual billing | Automated online payments |
+| Lack of insights | Data-driven reporting |
+| Difficult scalability | Multi-campus management |
 
 ---
 
-## Links & Images
+## Why Digitising Campus Hostels Is Essential
 
-Visit [Google Docs](https://docs.google.com) to manage your documents.
+Digital transformation in residential life is now a strategic necessity rather than a luxury.
+
+> Institutions can no longer afford to rely on outdated systems.
+
+---
+
+## Key Benefits of Hostel Management Software Systems
+
+### For Students
+
+- Enhanced Experience
+- Feeling Heard
+- Convenience
+- Improved Safety & Well-being
+- Better Living Environment
+
+### For Hostel Administrators & Staff
+
+1. Centralised Operations
+2. Increased Efficiency & Time Savings
+3. Data-Driven Insights
+4. Enhanced Accountability
+5. Better Communication
+6. Reduced Stress
+
+### For Institutions
+
+- Improved Reputation & Brand Image
+- Optimised Resource Utilisation
+- Compliance & Reporting
+- Scalability
+
+---
+
+## Benefits Summary Table
+
+| Stakeholder | Key Benefits |
+|------------|-------------|
+| Students | Enhanced Experience, Safety, Convenience |
+| Administrators | Centralised Operations, Analytics |
+| Institutions | Reputation, Compliance, Scalability |
+
+---
+
+## Essential Features Of An Ideal Hostel Management System
+
+### Student & Room Management
+
+An ideal system streamlines the entire experience of students living in the hostel.
+
+### Attendance & Leave Management
+
+- Automated attendance tracking
+- QR code attendance
+- Biometric support
+- Digital leave workflow
+
+### Fee & Billing Operations
+
+- Automated invoicing
+- Online payments
+- Payment reminders
+- Receipt generation
+
+### Responsive Complaint & Grievance Handling
+
+Students can:
+
+- Submit complaints
+- Track complaint status
+- Communicate with staff
+
+### Integrated Mess & Cafeteria Management
+
+1. Meal plan enrollment
+2. Consumption tracking
+3. Inventory management
+4. Menu scheduling
+5. Student feedback collection
+
+---
+
+## Advanced Security & Maintenance
+
+**Security Features**
+
+- Smart Locks
+- RFID Access
+- CCTV Integration
+- Visitor Management
+
+**Maintenance Features**
+
+- Ticket Management
+- Repair Tracking
+- Issue Escalation
+
+---
+
+## How To Choose The Best Hostel Management Software
+
+### Checklist
+
+- Assess your institution's needs
+- Prioritise key features
+- Evaluate user-friendliness
+- Check scalability
+- Verify security
+- Review customer support
+- Analyse ROI
+
+---
+
+## Testimonial
+
+> "SpaceBasic has made managing hostels effortless with technology."
+
+**Elanchezhiyan Ganesan**  
+*Vice President of Campus Infrastructure*  
+*Manipal Global Academy of BFSI*
+
+---
+
+## Conclusion
+
+**Hostel Management Software** helps institutions streamline operations, improve security, and deliver a better residential experience.
+
+*Digital transformation is the future of campus hostel management.*
+
+---
+
+## Frequently Asked Questions (FAQs)
+
+### Q1: Is SpaceBasic designed to handle campus expansions?
+
+Yes. SpaceBasic supports multi-campus management and seamless scalability.
+
+### Q2: Is SpaceBasic suitable for all types of hostels?
+
+Yes. It supports schools, colleges, universities, and training institutes.
+
+### Q3: Can hostel software manage mess operations?
+
+Yes. It includes meal plans, menu scheduling, inventory tracking, and feedback management.
 `;
 
 export default function Home() {
@@ -84,7 +205,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/google-docs/create", {
+      const response = await fetch("/api/google-docs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ markdown }),
@@ -183,6 +304,7 @@ export default function Home() {
             )}
           </button>
         </div>
+        
 
         {/* Error banner */}
         {error && (

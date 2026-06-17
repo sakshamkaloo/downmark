@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { google } from "googleapis";
 import path from "path";
 import { marked } from "marked";
@@ -8,13 +7,11 @@ import { NextRequest } from "next/server";
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Extract plain text from a marked inline-token array */
 function inlineToPlain(tokens: any[]): string {
   return tokens
     .map((t: any) => {
-      if (t.type === "strong" || t.type === "em" || t.type === "del") {
+      if (t.type === "strong" || t.type === "em" || t.type === "del")
         return inlineToPlain(t.tokens ?? []);
-      }
       if (t.type === "link") return inlineToPlain(t.tokens ?? []);
       if (t.type === "image") return t.text ?? "";
       return t.raw ?? t.text ?? "";
@@ -22,11 +19,7 @@ function inlineToPlain(tokens: any[]): string {
     .join("");
 }
 
-/** Build bold/italic/link requests for a paragraph-like block */
-function buildInlineRequests(
-  tokens: any[],
-  startIndex: number
-): { requests: any[]; length: number } {
+function buildInlineRequests(tokens: any[], startIndex: number): any[] {
   const requests: any[] = [];
   let offset = startIndex;
 
@@ -42,12 +35,8 @@ function buildInlineRequests(
           fields: "bold",
         },
       });
-      // Recurse for nested em inside strong
-      if (t.tokens) {
-        buildInlineRequests(t.tokens, offset).requests.forEach((r) =>
-          requests.push(r)
-        );
-      }
+      if (t.tokens)
+        buildInlineRequests(t.tokens, offset).forEach((r) => requests.push(r));
     } else if (t.type === "em") {
       requests.push({
         updateTextStyle: {
@@ -57,7 +46,6 @@ function buildInlineRequests(
         },
       });
     } else if (t.type === "link") {
-      // Underline + blue color for links
       requests.push({
         updateTextStyle: {
           range: { startIndex: offset, endIndex: offset + len },
@@ -71,27 +59,14 @@ function buildInlineRequests(
         },
       });
     }
-
     offset += len;
   }
-
-  return { requests, length: offset - startIndex };
+  return requests;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LIST ITEM PLAIN-TEXT + inline info
-// ─────────────────────────────────────────────────────────────────────────────
-interface ListItemInfo {
-  text: string; // plain text (no markdown symbols)
-  tokens: any[]; // inline tokens for formatting
-}
-
-function parseListItem(item: any): ListItemInfo {
-  // item.tokens is array of block tokens; first is usually a paragraph
-  const inlineTokens: any[] =
-    item.tokens?.[0]?.tokens ?? item.tokens ?? [];
-  const text = inlineToPlain(inlineTokens);
-  return { text, tokens: inlineTokens };
+function parseListItem(item: any): { text: string; tokens: any[] } {
+  const inlineTokens: any[] = item.tokens?.[0]?.tokens ?? item.tokens ?? [];
+  return { text: inlineToPlain(inlineTokens), tokens: inlineTokens };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,13 +75,11 @@ function parseListItem(item: any): ListItemInfo {
 export async function POST(req: NextRequest) {
   try {
     const { markdown } = await req.json();
-    if (!markdown) {
+    if (!markdown)
       return Response.json({ error: "No markdown provided" }, { status: 400 });
-    }
 
     const tokens = marked.lexer(markdown);
 
-    // ── Auth ──────────────────────────────────────────────────────────────
     const auth = new google.auth.GoogleAuth({
       keyFile: path.join(process.cwd(), "google-service-account.json"),
       scopes: [
@@ -114,104 +87,104 @@ export async function POST(req: NextRequest) {
         "https://www.googleapis.com/auth/drive",
       ],
     });
-    const docs = google.docs({ version: "v1", auth });
+    const client = await auth.getClient();
+       console.log("AUTH SUCCESS");
+    const drive = google.drive({
+  version: "v3",
+  auth,
+});
 
-    // ── Create document ───────────────────────────────────────────────────
-    const createRes = await docs.documents.create({
-      requestBody: { title: "Markdown Document" },
-    });
+console.log("TESTING DRIVE ACCESS...");
+
+const about = await drive.about.get({
+  fields: "*",
+});
+
+console.log("DRIVE ACCESS OK");
+console.log(JSON.stringify(about.data, null, 2));
+
+return Response.json({
+  success: true,
+});
+        
+
+     console.log("DOC CREATED:", createRes.data.documentId);
+   
     const documentId = createRes.data.documentId!;
 
-    // ═════════════════════════════════════════════════════════════════════
-    // PHASE 1 — Insert all text (NO formatting yet)
-    // We must insert text first so indices are stable, then format in phase 2.
-    // Tables need a separate two-phase batchUpdate because insertTable shifts
-    // indices and we need the doc's real cell indices from the API response.
-    // ═════════════════════════════════════════════════════════════════════
+    // =========================================================================
+    // ARCHITECTURE
+    // =========================================================================
+    // Phase 1 — Insert all text. Tables get a 1-char "\n" placeholder so
+    //           subsequent segment indices stay correct.
+    // Phase 2 — Apply all NON-TABLE formatting (headings H1-H6, bullets,
+    //           ordered lists, bold/italic/links, code, blockquote, hr).
+    //           Must happen BEFORE table insertion because insertTable shifts
+    //           every index after the insertion point.
+    // Phase 3 — Insert real Google Docs tables in REVERSE order (so earlier
+    //           placeholder indices are not disturbed). For each table:
+    //             a) insertTable at placeholder index
+    //             b) fetch doc, find table, fill cells (reverse order)
+    //             c) bold + grey-bg header row
+    //             d) delete the now-empty placeholder paragraph
+    // =========================================================================
 
     interface Segment {
-      type:
-        | "heading"
-        | "paragraph"
-        | "list"
-        | "table"
-        | "code"
-        | "blockquote"
-        | "hr"
-        | "space";
+      type: "heading" | "paragraph" | "list" | "table" | "code" | "blockquote" | "hr";
       startIndex: number;
       endIndex: number;
       token: any;
-      // list-specific
       itemRanges?: Array<{ start: number; end: number; tokens: any[] }>;
       ordered?: boolean;
     }
 
+    interface TableInfo {
+      placeholderIndex: number;
+      numRows: number;
+      numCols: number;
+      headerCells: string[];
+      bodyRows: string[][];
+    }
+
     const segments: Segment[] = [];
     const insertRequests: any[] = [];
-    let idx = 1; // Google Docs body starts at index 1
+    const tables: TableInfo[] = [];
+    let idx = 1;
 
     for (const token of tokens) {
-      // ── space ────────────────────────────────────────────────────────
       if (token.type === "space") continue;
 
-      // ── HEADING ──────────────────────────────────────────────────────
+      // ── HEADING H1–H6 ────────────────────────────────────────────────
       if (token.type === "heading") {
-        const inlineTokens = token.tokens ?? [];
-        const text = inlineToPlain(inlineTokens) + "\n";
+        const text = inlineToPlain(token.tokens ?? []) + "\n";
         const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "heading",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
+        insertRequests.push({ insertText: { location: { index: start }, text } });
+        segments.push({ type: "heading", startIndex: start, endIndex: start + text.length, token });
         idx += text.length;
         continue;
       }
 
       // ── PARAGRAPH ────────────────────────────────────────────────────
       if (token.type === "paragraph") {
-        const inlineTokens = token.tokens ?? [];
-        const text = inlineToPlain(inlineTokens) + "\n";
+        const text = inlineToPlain(token.tokens ?? []) + "\n";
         const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "paragraph",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
+        insertRequests.push({ insertText: { location: { index: start }, text } });
+        segments.push({ type: "paragraph", startIndex: start, endIndex: start + text.length, token });
         idx += text.length;
         continue;
       }
 
-      // ── LIST ─────────────────────────────────────────────────────────
+      // ── LIST (bullet + ordered) ───────────────────────────────────────
       if (token.type === "list") {
         const listStart = idx;
-        const itemRanges: Array<{
-          start: number;
-          end: number;
-          tokens: any[];
-        }> = [];
+        const itemRanges: Array<{ start: number; end: number; tokens: any[] }> = [];
 
         for (const item of token.items) {
           const { text, tokens: inlineToks } = parseListItem(item);
           const itemText = text + "\n";
           const itemStart = idx;
-          insertRequests.push({
-            insertText: { location: { index: itemStart }, text: itemText },
-          });
-          itemRanges.push({
-            start: itemStart,
-            end: itemStart + itemText.length,
-            tokens: inlineToks,
-          });
+          insertRequests.push({ insertText: { location: { index: itemStart }, text: itemText } });
+          itemRanges.push({ start: itemStart, end: itemStart + itemText.length, tokens: inlineToks });
           idx += itemText.length;
         }
 
@@ -226,33 +199,26 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // ── TABLE — insert as placeholder text, handle separately ─────────
+      // ── TABLE — 1-char placeholder ────────────────────────────────────
       if (token.type === "table") {
-        // We'll do tables in a dedicated phase after all text is inserted
-        // For now push a newline placeholder so other indices stay correct
-        // Tables will be inserted BEFORE the main text batch using insertTable
-        // Actually: we need to insert table INLINE — use a different strategy:
-        // Insert a blank line as placeholder, record position, replace later.
-        // Best approach: insert table text as plain ASCII, then post-process.
-        // ─ simplest reliable approach: serialize table as plain text ────
-        const header = (token.header as any[])
-          .map((h: any) => (h.text ?? h))
-          .join("\t");
-        const rows = (token.rows as any[][])
-          .map((row) => row.map((c: any) => (c.text ?? c)).join("\t"))
-          .join("\n");
-        const text = header + "\n" + rows + "\n\n";
+        const headerCells: string[] = (token.header as any[]).map(
+          (h: any) => (typeof h === "string" ? h : h.text ?? "")
+        );
+        const bodyRows: string[][] = (token.rows as any[][]).map((row) =>
+          row.map((c: any) => (typeof c === "string" ? c : c.text ?? ""))
+        );
+
         const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
+        insertRequests.push({ insertText: { location: { index: start }, text: "\n" } });
+        segments.push({ type: "table", startIndex: start, endIndex: start + 1, token });
+        tables.push({
+          placeholderIndex: start,
+          numRows: 1 + bodyRows.length,
+          numCols: headerCells.length,
+          headerCells,
+          bodyRows,
         });
-        segments.push({
-          type: "table",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
+        idx += 1;
         continue;
       }
 
@@ -260,15 +226,8 @@ export async function POST(req: NextRequest) {
       if (token.type === "code") {
         const text = token.text + "\n\n";
         const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "code",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
+        insertRequests.push({ insertText: { location: { index: start }, text } });
+        segments.push({ type: "code", startIndex: start, endIndex: start + text.length, token });
         idx += text.length;
         continue;
       }
@@ -277,43 +236,28 @@ export async function POST(req: NextRequest) {
       if (token.type === "blockquote") {
         const rawText =
           (token as any).text ??
-          ((token as any).tokens ?? [])
-            .map((t: any) => t.text ?? "")
-            .join(" ");
+          ((token as any).tokens ?? []).map((t: any) => t.text ?? "").join(" ");
         const text = rawText + "\n\n";
         const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "blockquote",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
+        insertRequests.push({ insertText: { location: { index: start }, text } });
+        segments.push({ type: "blockquote", startIndex: start, endIndex: start + text.length, token });
         idx += text.length;
         continue;
       }
 
       // ── HR ───────────────────────────────────────────────────────────
       if (token.type === "hr") {
-        const text = "\n";
         const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "hr",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
+        insertRequests.push({ insertText: { location: { index: start }, text: "\n" } });
+        segments.push({ type: "hr", startIndex: start, endIndex: start + 1, token });
+        idx += 1;
         continue;
       }
     }
 
-    // Execute Phase 1: insert all text
+    // =========================================================================
+    // PHASE 1 — Insert all text
+    // =========================================================================
     if (insertRequests.length > 0) {
       await docs.documents.batchUpdate({
         documentId,
@@ -321,23 +265,37 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ═════════════════════════════════════════════════════════════════════
-    // PHASE 2 — Apply all formatting
-    // ═════════════════════════════════════════════════════════════════════
+    // =========================================================================
+    // PHASE 2 — Apply all non-table formatting
+    // =========================================================================
     const fmtRequests: any[] = [];
 
-    // Blue color for H2 headings (matching screenshots)
-    const H2_BLUE = { red: 0.102, green: 0.451, blue: 0.918 }; // #1A73E8
-    const H3_DARK = { red: 0.224, green: 0.271, blue: 0.369 }; // #394560
+    // Colors matching the screenshots
+    const COLORS: Record<number, object> = {
+      1: { red: 0.067, green: 0.067, blue: 0.067 }, // H1 near-black
+      2: { red: 0.216, green: 0.384, blue: 0.804 }, // H2 blue  #3762CD
+      3: { red: 0.224, green: 0.271, blue: 0.369 }, // H3 dark slate #394560
+      4: { red: 0.310, green: 0.310, blue: 0.310 }, // H4 dark grey
+      5: { red: 0.420, green: 0.420, blue: 0.420 }, // H5 mid grey
+      6: { red: 0.520, green: 0.520, blue: 0.520 }, // H6 light grey
+    };
+
+    const NAMED_STYLE: Record<number, string> = {
+      1: "HEADING_1",
+      2: "HEADING_2",
+      3: "HEADING_3",
+      4: "HEADING_4",
+      5: "HEADING_5",
+      6: "HEADING_6",
+    };
 
     for (const seg of segments) {
       const { startIndex: s, endIndex: e, token } = seg;
 
-      // ── HEADING ────────────────────────────────────────────────────
+      // ── HEADING ──────────────────────────────────────────────────────
       if (seg.type === "heading") {
-        const depth = token.depth as number;
-        const namedStyle =
-          depth === 1 ? "HEADING_1" : depth === 2 ? "HEADING_2" : "HEADING_3";
+        const depth = Math.min(token.depth as number, 6);
+        const namedStyle = NAMED_STYLE[depth] ?? "HEADING_3";
 
         fmtRequests.push({
           updateParagraphStyle: {
@@ -347,48 +305,29 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // H2 → blue color (matching screenshots: blue headings)
-        if (depth === 2) {
+        const color = COLORS[depth];
+        if (color) {
           fmtRequests.push({
             updateTextStyle: {
               range: { startIndex: s, endIndex: e - 1 },
-              textStyle: {
-                foregroundColor: { color: { rgbColor: H2_BLUE } },
-              },
+              textStyle: { foregroundColor: { color: { rgbColor: color } } },
               fields: "foregroundColor",
             },
           });
         }
-
-        // H3 → dark blue-grey
-        if (depth === 3) {
-          fmtRequests.push({
-            updateTextStyle: {
-              range: { startIndex: s, endIndex: e - 1 },
-              textStyle: {
-                foregroundColor: { color: { rgbColor: H3_DARK } },
-              },
-              fields: "foregroundColor",
-            },
-          });
-        }
+        continue;
       }
 
-      // ── PARAGRAPH ──────────────────────────────────────────────────
+      // ── PARAGRAPH ────────────────────────────────────────────────────
       if (seg.type === "paragraph") {
         const inlineTokens = token.tokens ?? [];
-        if (inlineTokens.length > 0) {
-          const { requests: inlineReqs } = buildInlineRequests(
-            inlineTokens,
-            s
-          );
-          inlineReqs.forEach((r) => fmtRequests.push(r));
-        }
+        if (inlineTokens.length > 0)
+          buildInlineRequests(inlineTokens, s).forEach((r) => fmtRequests.push(r));
+        continue;
       }
 
-      // ── LIST ───────────────────────────────────────────────────────
+      // ── LIST ─────────────────────────────────────────────────────────
       if (seg.type === "list" && seg.itemRanges) {
-        // Apply bullet/number style
         fmtRequests.push({
           createParagraphBullets: {
             range: { startIndex: seg.startIndex, endIndex: seg.endIndex },
@@ -398,43 +337,16 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // Apply inline formatting per item (bold labels etc.)
         for (const itemRange of seg.itemRanges) {
-          if (itemRange.tokens.length > 0) {
-            const { requests: inlineReqs } = buildInlineRequests(
-              itemRange.tokens,
-              itemRange.start
+          if (itemRange.tokens.length > 0)
+            buildInlineRequests(itemRange.tokens, itemRange.start).forEach((r) =>
+              fmtRequests.push(r)
             );
-            inlineReqs.forEach((r) => fmtRequests.push(r));
-          }
         }
+        continue;
       }
 
-      // ── TABLE (plain text formatting) ───────────────────────────────
-      if (seg.type === "table") {
-        // Bold the header row text
-        const header = (token.header as any[])
-          .map((h: any) => (h.text ?? h))
-          .join("\t");
-        // Header occupies startIndex → startIndex + header.length
-        fmtRequests.push({
-          updateTextStyle: {
-            range: { startIndex: s, endIndex: s + header.length },
-            textStyle: { bold: true },
-            fields: "bold",
-          },
-        });
-        // Center-align header
-        fmtRequests.push({
-          updateParagraphStyle: {
-            range: { startIndex: s, endIndex: s + header.length + 1 },
-            paragraphStyle: { alignment: "CENTER" },
-            fields: "alignment",
-          },
-        });
-      }
-
-      // ── CODE ───────────────────────────────────────────────────────
+      // ── CODE ─────────────────────────────────────────────────────────
       if (seg.type === "code") {
         fmtRequests.push({
           updateTextStyle: {
@@ -462,539 +374,10 @@ export async function POST(req: NextRequest) {
             fields: "shading",
           },
         });
-      }
-
-      // ── BLOCKQUOTE ─────────────────────────────────────────────────
-      if (seg.type === "blockquote") {
-        fmtRequests.push({
-          updateTextStyle: {
-            range: { startIndex: s, endIndex: e },
-            textStyle: {
-              italic: true,
-              foregroundColor: {
-                color: { rgbColor: { red: 0.4, green: 0.4, blue: 0.4 } },
-              },
-            },
-            fields: "italic,foregroundColor",
-          },
-        });
-        fmtRequests.push({
-          updateParagraphStyle: {
-            range: { startIndex: s, endIndex: e },
-            paragraphStyle: {
-              indentStart: { magnitude: 36, unit: "PT" },
-              indentEnd: { magnitude: 36, unit: "PT" },
-            },
-            fields: "indentStart,indentEnd",
-          },
-        });
-      }
-
-      // ── HR ─────────────────────────────────────────────────────────
-      if (seg.type === "hr") {
-        fmtRequests.push({
-          updateParagraphStyle: {
-            range: { startIndex: s, endIndex: e },
-            paragraphStyle: {
-              borderBottom: {
-                color: { color: { rgbColor: { red: 0.8, green: 0.8, blue: 0.8 } } },
-                dashStyle: "SOLID",
-                padding: { magnitude: 4, unit: "PT" },
-                width: { magnitude: 1, unit: "PT" },
-              },
-            },
-            fields: "borderBottom",
-          },
-        });
-      }
-    }
-
-    // Execute Phase 2: apply all formatting
-    if (fmtRequests.length > 0) {
-      await docs.documents.batchUpdate({
-        documentId,
-        requestBody: { requests: fmtRequests },
-      });
-    }
-
-    return Response.json({
-      url: `https://docs.google.com/document/d/${documentId}/edit`,
-    });
-  } catch (error: any) {
-    console.error("API ERROR:", error?.message, error?.response?.data ?? "");
-    return Response.json(
-      { error: error.message ?? "Unknown error" },
-      { status: 500 }
-    );
-  }
-}
-=======
-import { google } from "googleapis";
-import path from "path";
-import { marked } from "marked";
-import { NextRequest } from "next/server";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Extract plain text from a marked inline-token array */
-function inlineToPlain(tokens: any[]): string {
-  return tokens
-    .map((t: any) => {
-      if (t.type === "strong" || t.type === "em" || t.type === "del") {
-        return inlineToPlain(t.tokens ?? []);
-      }
-      if (t.type === "link") return inlineToPlain(t.tokens ?? []);
-      if (t.type === "image") return t.text ?? "";
-      return t.raw ?? t.text ?? "";
-    })
-    .join("");
-}
-
-/** Build bold/italic/link requests for a paragraph-like block */
-function buildInlineRequests(
-  tokens: any[],
-  startIndex: number
-): { requests: any[]; length: number } {
-  const requests: any[] = [];
-  let offset = startIndex;
-
-  for (const t of tokens) {
-    const plain = inlineToPlain([t]);
-    const len = plain.length;
-
-    if (t.type === "strong") {
-      requests.push({
-        updateTextStyle: {
-          range: { startIndex: offset, endIndex: offset + len },
-          textStyle: { bold: true },
-          fields: "bold",
-        },
-      });
-      // Recurse for nested em inside strong
-      if (t.tokens) {
-        buildInlineRequests(t.tokens, offset).requests.forEach((r) =>
-          requests.push(r)
-        );
-      }
-    } else if (t.type === "em") {
-      requests.push({
-        updateTextStyle: {
-          range: { startIndex: offset, endIndex: offset + len },
-          textStyle: { italic: true },
-          fields: "italic",
-        },
-      });
-    } else if (t.type === "link") {
-      // Underline + blue color for links
-      requests.push({
-        updateTextStyle: {
-          range: { startIndex: offset, endIndex: offset + len },
-          textStyle: {
-            underline: true,
-            foregroundColor: {
-              color: { rgbColor: { red: 0.102, green: 0.451, blue: 0.918 } },
-            },
-          },
-          fields: "underline,foregroundColor",
-        },
-      });
-    }
-
-    offset += len;
-  }
-
-  return { requests, length: offset - startIndex };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LIST ITEM PLAIN-TEXT + inline info
-// ─────────────────────────────────────────────────────────────────────────────
-interface ListItemInfo {
-  text: string; // plain text (no markdown symbols)
-  tokens: any[]; // inline tokens for formatting
-}
-
-function parseListItem(item: any): ListItemInfo {
-  // item.tokens is array of block tokens; first is usually a paragraph
-  const inlineTokens: any[] =
-    item.tokens?.[0]?.tokens ?? item.tokens ?? [];
-  const text = inlineToPlain(inlineTokens);
-  return { text, tokens: inlineTokens };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN HANDLER
-// ─────────────────────────────────────────────────────────────────────────────
-export async function POST(req: NextRequest) {
-  try {
-    const { markdown } = await req.json();
-    if (!markdown) {
-      return Response.json({ error: "No markdown provided" }, { status: 400 });
-    }
-
-    const tokens = marked.lexer(markdown);
-
-    // ── Auth ──────────────────────────────────────────────────────────────
-    const auth = new google.auth.GoogleAuth({
-      keyFile: path.join(process.cwd(), "google-service-account.json"),
-      scopes: [
-        "https://www.googleapis.com/auth/documents",
-        "https://www.googleapis.com/auth/drive",
-      ],
-    });
-    const docs = google.docs({ version: "v1", auth });
-
-    // ── Create document ───────────────────────────────────────────────────
-    const createRes = await docs.documents.create({
-      requestBody: { title: "Markdown Document" },
-    });
-    const documentId = createRes.data.documentId!;
-
-    // ═════════════════════════════════════════════════════════════════════
-    // PHASE 1 — Insert all text (NO formatting yet)
-    // We must insert text first so indices are stable, then format in phase 2.
-    // Tables need a separate two-phase batchUpdate because insertTable shifts
-    // indices and we need the doc's real cell indices from the API response.
-    // ═════════════════════════════════════════════════════════════════════
-
-    interface Segment {
-      type:
-        | "heading"
-        | "paragraph"
-        | "list"
-        | "table"
-        | "code"
-        | "blockquote"
-        | "hr"
-        | "space";
-      startIndex: number;
-      endIndex: number;
-      token: any;
-      // list-specific
-      itemRanges?: Array<{ start: number; end: number; tokens: any[] }>;
-      ordered?: boolean;
-    }
-
-    const segments: Segment[] = [];
-    const insertRequests: any[] = [];
-    let idx = 1; // Google Docs body starts at index 1
-
-    for (const token of tokens) {
-      // ── space ────────────────────────────────────────────────────────
-      if (token.type === "space") continue;
-
-      // ── HEADING ──────────────────────────────────────────────────────
-      if (token.type === "heading") {
-        const inlineTokens = token.tokens ?? [];
-        const text = inlineToPlain(inlineTokens) + "\n";
-        const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "heading",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
-        continue;
-      }
-
-      // ── PARAGRAPH ────────────────────────────────────────────────────
-      if (token.type === "paragraph") {
-        const inlineTokens = token.tokens ?? [];
-        const text = inlineToPlain(inlineTokens) + "\n";
-        const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "paragraph",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
-        continue;
-      }
-
-      // ── LIST ─────────────────────────────────────────────────────────
-      if (token.type === "list") {
-        const listStart = idx;
-        const itemRanges: Array<{
-          start: number;
-          end: number;
-          tokens: any[];
-        }> = [];
-
-        for (const item of token.items) {
-          const { text, tokens: inlineToks } = parseListItem(item);
-          const itemText = text + "\n";
-          const itemStart = idx;
-          insertRequests.push({
-            insertText: { location: { index: itemStart }, text: itemText },
-          });
-          itemRanges.push({
-            start: itemStart,
-            end: itemStart + itemText.length,
-            tokens: inlineToks,
-          });
-          idx += itemText.length;
-        }
-
-        segments.push({
-          type: "list",
-          startIndex: listStart,
-          endIndex: idx,
-          token,
-          itemRanges,
-          ordered: token.ordered,
-        });
-        continue;
-      }
-
-      // ── TABLE — insert as placeholder text, handle separately ─────────
-      if (token.type === "table") {
-        // We'll do tables in a dedicated phase after all text is inserted
-        // For now push a newline placeholder so other indices stay correct
-        // Tables will be inserted BEFORE the main text batch using insertTable
-        // Actually: we need to insert table INLINE — use a different strategy:
-        // Insert a blank line as placeholder, record position, replace later.
-        // Best approach: insert table text as plain ASCII, then post-process.
-        // ─ simplest reliable approach: serialize table as plain text ────
-        const header = (token.header as any[])
-          .map((h: any) => (h.text ?? h))
-          .join("\t");
-        const rows = (token.rows as any[][])
-          .map((row) => row.map((c: any) => (c.text ?? c)).join("\t"))
-          .join("\n");
-        const text = header + "\n" + rows + "\n\n";
-        const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "table",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
-        continue;
-      }
-
-      // ── CODE ─────────────────────────────────────────────────────────
-      if (token.type === "code") {
-        const text = token.text + "\n\n";
-        const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "code",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
         continue;
       }
 
       // ── BLOCKQUOTE ───────────────────────────────────────────────────
-      if (token.type === "blockquote") {
-        const rawText =
-          (token as any).text ??
-          ((token as any).tokens ?? [])
-            .map((t: any) => t.text ?? "")
-            .join(" ");
-        const text = rawText + "\n\n";
-        const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "blockquote",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
-        continue;
-      }
-
-      // ── HR ───────────────────────────────────────────────────────────
-      if (token.type === "hr") {
-        const text = "\n";
-        const start = idx;
-        insertRequests.push({
-          insertText: { location: { index: start }, text },
-        });
-        segments.push({
-          type: "hr",
-          startIndex: start,
-          endIndex: start + text.length,
-          token,
-        });
-        idx += text.length;
-        continue;
-      }
-    }
-
-    // Execute Phase 1: insert all text
-    if (insertRequests.length > 0) {
-      await docs.documents.batchUpdate({
-        documentId,
-        requestBody: { requests: insertRequests },
-      });
-    }
-
-    // ═════════════════════════════════════════════════════════════════════
-    // PHASE 2 — Apply all formatting
-    // ═════════════════════════════════════════════════════════════════════
-    const fmtRequests: any[] = [];
-
-    // Blue color for H2 headings (matching screenshots)
-    const H2_BLUE = { red: 0.102, green: 0.451, blue: 0.918 }; // #1A73E8
-    const H3_DARK = { red: 0.224, green: 0.271, blue: 0.369 }; // #394560
-
-    for (const seg of segments) {
-      const { startIndex: s, endIndex: e, token } = seg;
-
-      // ── HEADING ────────────────────────────────────────────────────
-      if (seg.type === "heading") {
-        const depth = token.depth as number;
-        const namedStyle =
-          depth === 1 ? "HEADING_1" : depth === 2 ? "HEADING_2" : "HEADING_3";
-
-        fmtRequests.push({
-          updateParagraphStyle: {
-            range: { startIndex: s, endIndex: e },
-            paragraphStyle: { namedStyleType: namedStyle },
-            fields: "namedStyleType",
-          },
-        });
-
-        // H2 → blue color (matching screenshots: blue headings)
-        if (depth === 2) {
-          fmtRequests.push({
-            updateTextStyle: {
-              range: { startIndex: s, endIndex: e - 1 },
-              textStyle: {
-                foregroundColor: { color: { rgbColor: H2_BLUE } },
-              },
-              fields: "foregroundColor",
-            },
-          });
-        }
-
-        // H3 → dark blue-grey
-        if (depth === 3) {
-          fmtRequests.push({
-            updateTextStyle: {
-              range: { startIndex: s, endIndex: e - 1 },
-              textStyle: {
-                foregroundColor: { color: { rgbColor: H3_DARK } },
-              },
-              fields: "foregroundColor",
-            },
-          });
-        }
-      }
-
-      // ── PARAGRAPH ──────────────────────────────────────────────────
-      if (seg.type === "paragraph") {
-        const inlineTokens = token.tokens ?? [];
-        if (inlineTokens.length > 0) {
-          const { requests: inlineReqs } = buildInlineRequests(
-            inlineTokens,
-            s
-          );
-          inlineReqs.forEach((r) => fmtRequests.push(r));
-        }
-      }
-
-      // ── LIST ───────────────────────────────────────────────────────
-      if (seg.type === "list" && seg.itemRanges) {
-        // Apply bullet/number style
-        fmtRequests.push({
-          createParagraphBullets: {
-            range: { startIndex: seg.startIndex, endIndex: seg.endIndex },
-            bulletPreset: seg.ordered
-              ? "NUMBERED_DECIMAL_ALPHA_ROMAN"
-              : "BULLET_DISC_CIRCLE_SQUARE",
-          },
-        });
-
-        // Apply inline formatting per item (bold labels etc.)
-        for (const itemRange of seg.itemRanges) {
-          if (itemRange.tokens.length > 0) {
-            const { requests: inlineReqs } = buildInlineRequests(
-              itemRange.tokens,
-              itemRange.start
-            );
-            inlineReqs.forEach((r) => fmtRequests.push(r));
-          }
-        }
-      }
-
-      // ── TABLE (plain text formatting) ───────────────────────────────
-      if (seg.type === "table") {
-        // Bold the header row text
-        const header = (token.header as any[])
-          .map((h: any) => (h.text ?? h))
-          .join("\t");
-        // Header occupies startIndex → startIndex + header.length
-        fmtRequests.push({
-          updateTextStyle: {
-            range: { startIndex: s, endIndex: s + header.length },
-            textStyle: { bold: true },
-            fields: "bold",
-          },
-        });
-        // Center-align header
-        fmtRequests.push({
-          updateParagraphStyle: {
-            range: { startIndex: s, endIndex: s + header.length + 1 },
-            paragraphStyle: { alignment: "CENTER" },
-            fields: "alignment",
-          },
-        });
-      }
-
-      // ── CODE ───────────────────────────────────────────────────────
-      if (seg.type === "code") {
-        fmtRequests.push({
-          updateTextStyle: {
-            range: { startIndex: s, endIndex: e },
-            textStyle: {
-              weightedFontFamily: { fontFamily: "Courier New" },
-              foregroundColor: {
-                color: { rgbColor: { red: 0.2, green: 0.2, blue: 0.6 } },
-              },
-              fontSize: { magnitude: 10, unit: "PT" },
-            },
-            fields: "weightedFontFamily,foregroundColor,fontSize",
-          },
-        });
-        fmtRequests.push({
-          updateParagraphStyle: {
-            range: { startIndex: s, endIndex: e },
-            paragraphStyle: {
-              shading: {
-                backgroundColor: {
-                  color: { rgbColor: { red: 0.95, green: 0.95, blue: 0.95 } },
-                },
-              },
-            },
-            fields: "shading",
-          },
-        });
-      }
-
-      // ── BLOCKQUOTE ─────────────────────────────────────────────────
       if (seg.type === "blockquote") {
         fmtRequests.push({
           updateTextStyle: {
@@ -1018,9 +401,10 @@ export async function POST(req: NextRequest) {
             fields: "indentStart,indentEnd",
           },
         });
+        continue;
       }
 
-      // ── HR ─────────────────────────────────────────────────────────
+      // ── HR ───────────────────────────────────────────────────────────
       if (seg.type === "hr") {
         fmtRequests.push({
           updateParagraphStyle: {
@@ -1036,15 +420,187 @@ export async function POST(req: NextRequest) {
             fields: "borderBottom",
           },
         });
+        continue;
       }
     }
 
-    // Execute Phase 2: apply all formatting
     if (fmtRequests.length > 0) {
       await docs.documents.batchUpdate({
         documentId,
         requestBody: { requests: fmtRequests },
       });
+    }
+
+    // =========================================================================
+    // PHASE 3 — Insert real Google Docs tables in REVERSE order
+    // =========================================================================
+    for (let t = tables.length - 1; t >= 0; t--) {
+      const { placeholderIndex, numRows, numCols, headerCells, bodyRows } = tables[t];
+
+      // (a) Insert table structure
+      await docs.documents.batchUpdate({
+        documentId,
+        requestBody: {
+          requests: [
+            {
+              insertTable: {
+                rows: numRows,
+                columns: numCols,
+                location: { index: placeholderIndex },
+              },
+            },
+          ],
+        },
+      });
+
+      // (b) Fetch doc and find the inserted table
+      const snap1 = await docs.documents.get({ documentId });
+      const content1 = snap1.data.body!.content!;
+
+      let tableElem: any = null;
+      for (const elem of content1) {
+        if (
+          elem.table &&
+          elem.startIndex != null &&
+          elem.startIndex >= placeholderIndex - 1 &&
+          elem.startIndex <= placeholderIndex + 4
+        ) {
+          tableElem = elem;
+          break;
+        }
+      }
+      // fallback: pick last table
+      if (!tableElem) {
+        for (const elem of content1) {
+          if (elem.table) tableElem = elem;
+        }
+      }
+
+      if (tableElem) {
+        const tableRows: any[] = tableElem.table.tableRows ?? [];
+        const cellInserts: any[] = [];
+        const cellFmts: any[] = [];
+
+        for (let r = 0; r < tableRows.length; r++) {
+          const rowCells: any[] = tableRows[r].tableCells ?? [];
+          const isHeader = r === 0;
+          const cellTexts = isHeader ? headerCells : (bodyRows[r - 1] ?? []);
+
+          for (let c = 0; c < rowCells.length; c++) {
+            const cell = rowCells[c];
+            // NOTE: an empty table-cell paragraph occupies exactly one index
+            // (its mandatory trailing newline) and that index IS paraStart.
+            // Inserting at paraStart + 1 lands past this paragraph's bounds
+            // (at the start of the *next* cell, or after the table for the
+            // last cell), which either throws "insertion index must be
+            // inside the bounds of an existing paragraph" or silently shifts
+            // every cell's text into the wrong cell. Insert at paraStart.
+            const paraStart: number = cell.content?.[0]?.startIndex ?? 0;
+            const text = cellTexts[c] ?? "";
+
+            if (text) {
+              cellInserts.push({
+                insertText: { location: { index: paraStart }, text },
+              });
+            }
+
+            if (isHeader) {
+              if (text) {
+                cellFmts.push({
+                  updateTextStyle: {
+                    range: {
+                      startIndex: paraStart,
+                      endIndex: paraStart + text.length,
+                    },
+                    textStyle: { bold: true },
+                    fields: "bold",
+                  },
+                });
+              }
+              cellFmts.push({
+                updateTableCellStyle: {
+                  tableRange: {
+                    tableCellLocation: {
+                      tableStartLocation: { index: tableElem.startIndex },
+                      rowIndex: r,
+                      columnIndex: c,
+                    },
+                    rowSpan: 1,
+                    columnSpan: 1,
+                  },
+                  tableCellStyle: {
+                    backgroundColor: {
+                      color: { rgbColor: { red: 0.949, green: 0.953, blue: 0.957 } },
+                    },
+                  },
+                  fields: "backgroundColor",
+                },
+              });
+            }
+          }
+        }
+
+        // Insert cell text in reverse so earlier indices stay valid
+        if (cellInserts.length > 0) {
+          await docs.documents.batchUpdate({
+            documentId,
+            requestBody: { requests: [...cellInserts].reverse() },
+          });
+        }
+
+        // Apply cell formatting
+        if (cellFmts.length > 0) {
+          await docs.documents.batchUpdate({
+            documentId,
+            requestBody: { requests: cellFmts },
+          });
+        }
+
+        // (d) Delete the "\n" placeholder paragraph that now sits after the table
+        const snap2 = await docs.documents.get({ documentId });
+        const content2 = snap2.data.body!.content!;
+
+        let tblEndIdx: number | null = null;
+        for (const elem of content2) {
+          if (
+            elem.table &&
+            elem.startIndex != null &&
+            elem.startIndex >= placeholderIndex - 1 &&
+            elem.startIndex <= placeholderIndex + 4
+          ) {
+            tblEndIdx = elem.endIndex!;
+            break;
+          }
+        }
+
+        if (tblEndIdx !== null) {
+          const afterElem = content2.find(
+            (e) => e.startIndex === tblEndIdx && e.paragraph
+          );
+          if (afterElem) {
+            const paraText = (afterElem.paragraph?.elements ?? [])
+              .map((el: any) => el.textRun?.content ?? "")
+              .join("");
+            if (paraText === "\n" || paraText.trim() === "") {
+              await docs.documents.batchUpdate({
+                documentId,
+                requestBody: {
+                  requests: [
+                    {
+                      deleteContentRange: {
+                        range: {
+                          startIndex: afterElem.startIndex!,
+                          endIndex: afterElem.endIndex!,
+                        },
+                      },
+                    },
+                  ],
+                },
+              });
+            }
+          }
+        }
+      }
     }
 
     return Response.json({
@@ -1058,4 +614,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
->>>>>>> a80a3d9a6dbcde1b8989994703b70fca48145266
